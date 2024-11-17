@@ -1,13 +1,8 @@
-# ARGUS Project Fork
-
-This fork enables deployment of the ARGUS project with a front end on Azure using Web App. 
-The original project is available [here](https://github.com/Azure-Samples/ARGUS). 
-Feel free to reach out with any questions or suggestions.
-
 # ARGUS: Automated Retrieval and GPT Understanding System
 ### 
 
 > Argus Panoptes, in ancient Greek mythology, was a giant with a hundred eyes and a servant of the goddess Hera. His many eyes made him an excellent watchman, as some of his eyes would always remain open while the others slept, allowing him to be ever-vigilant.
+
 
 ## This solution demonstrates Azure Document Intelligence + GPT4 Vision
 
@@ -41,27 +36,84 @@ Before deploying the solution, you need to create an OpenAI resource and deploy 
 
 ## Deployment
 
-1. Open res_dep.ps1 and provide the following parameters:
-   - $resourceGroupName: New resource group name
-   - $subscriptionId: Your existing subscription ID
+### One-Click Deployment
 
-2. Open infra/main.bicep and provide the following parameters:
-   - azureOpenaiEndpoint: Your existing Azure OpenAI endpoint
-   - azureOpenaiKey: Your existing Azure OpenAI key
-   - azureOpenaiModelDeploymentName: Your existing Azure OpenAI model deployment name (if changing the model)
-   - If needed! Adjust the resource names to adhere to naming conventions.
+Click the button to directly deploy to Azure: 
 
-3. Run res_dep.ps1.
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FAzure-Samples%2FARGUS%2Fmain%2Finfra%2Fmain.json)
 
-4. Wait about 10 minutes for the Docker images to be pulled after deployment. Check progress in Function App > Deployment Center > Logs.
+`Deploy to Azure` offers a one click deployment without cloning the code. Alternatively, follow the instructions below.
 
-5. [Configure the web app to use Microsoft Entra sign-in](https://learn.microsoft.com/en-us/azure/app-service/configure-authentication-provider-aad?tabs=workforce-configuration).
+### Deployment with `azd up`
 
-6. Deploy the web app:
-   - Open front_dep.ps1 and provide the following parameters:
-     - $resourceGroupName: New resource group name
-     - $subscriptionId: Your existing subscription ID
-     - $webAppName: New web app name
+1. **Prerequisites**:
+   - Install [Azure Developer CLI](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/install-azd).
+   - Ensure you have access to an Azure subscription.
+   - Create an OpenAI resource and deploy a vision-capable model.
+
+2. **Deployment Steps**:
+   - Run the following command to deploy all resources:
+     ```sh
+     azd up
+     ```
+
+### Alternative: Manual Deployment
+
+1. **Bicep Template Deployment**:
+   - Use the provided `main.bicep` file to deploy resources manually:
+     ```sh
+     az deployment group create --resource-group <your-resource-group> --template-file main.bicep
+     ```
+
+> Note: After deployment wait for about 10 minutes for the docker images to be pulled. You can check the progress in your Functionapp > Deployment Center > Logs.
+
+## Running the Streamlit Frontend (recommended)
+
+To run the Streamlit app `app.py` located in the `frontend` folder, follow these steps:
+
+1. Install the required dependencies by running the following command in your terminal:
+   ```sh
+   pip install -r frontend/requirements.txt
+   ```
+
+2. Rename the `.env.temp` file to `.env`:
+   ```sh
+   mv frontend/.env.temp frontend/.env
+   ```
+
+3. Populate the `.env` file with the necessary environment variables. Open the `.env` file in a text editor and provide the required values for each variable.
+
+4. Assign a CosmsosDB and Blob Storage Role to your Principal ID:
+
+   Get the `principal ID` of the currently signed-in user:
+   ```
+   az ad signed-in-user show --query id -o tsv
+   ```
+   Then, create Cosmos and Blob `role assignments`:
+   ```
+   az cosmosdb sql role assignment create \
+      --principal-id "<principal-id>" \
+      --resource-group "<resource-group-name>" \
+      --account-name "<cosmos-account-name>" \
+      --role-definition-name "Cosmos DB Built-in Data Contributor" \
+      --scope "/subscriptions/<subscription-id>/resourceGroups/<resource-group-name>/providers/Microsoft.DocumentDB/databaseAccounts/<cosmos-account-name>"
+   ```
+   ```
+   az role assignment create \
+      --assignee "<principal-id>" \
+      --role "Storage Blob Data Contributor" \
+      --scope "/subscriptions/<subscription-id>/resourceGroups/<resource-group-name>/providers/Microsoft.Storage/storageAccounts/<storage-account-name>"
+   ```
+
+5. Start the Streamlit app by running the following command in your terminal:
+   ```sh
+   streamlit run frontend/app.py
+   ```
+
+## Running the Outlook integration with Logic App
+
+You can connect a Outlook inbox to send incoming attachments directly to the blob storage to trigger the extraction process. For that a Logic App was already built for you. The only thing you need to do is to open the resource "LogicAppName" add a trigger and connect it to your Outlook inbox. Open this [Microsoft Learn page](https://learn.microsoft.com/en-us/azure/logic-apps/tutorial-process-email-attachments-workflow) and search for "Add a trigger to check incoming email" follow the described steps then activate it with the "Run" button. 
+
 
 ## How to Use
 

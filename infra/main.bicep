@@ -1,14 +1,24 @@
+
+//====Change This====
+// Define the Azure OpenAI parameters
+@secure()
+param azureOpenaiEndpoint string = 'https://X.openai.azure.com/'
+@secure()
+param azureOpenaiKey string = 'Y'
+param azureOpenaiModelDeploymentName string = 'gpt-4o'
+
+
 // Change to your docker image if you edit the functionapp code
 param functionAppDockerImage string = 'DOCKER|argus.azurecr.io/argus-backend:latest'
 
 // Define the resource group location
-param location string = resourceGroup().location
+param location string = 'polandcentral'
 
 // Define the storage account name
 param storageAccountName string = 'sa${uniqueString(resourceGroup().id)}'
 
 // Define the Cosmos DB account name
-param cosmosDbAccountName string = 'cb${uniqueString(resourceGroup().id)}'
+param cosmosDbAccountName string = 'cba${uniqueString(resourceGroup().id)}'
 
 // Define the Cosmos DB database name
 param cosmosDbDatabaseName string = 'doc-extracts'
@@ -27,14 +37,11 @@ param appServicePlanName string = '${functionAppName}-plan'
 // Define the Document Intelligence resource name
 param documentIntelligenceName string = 'di${uniqueString(resourceGroup().id)}'
 
+param frontendAppName string = 'front-${uniqueString(resourceGroup().id)}'
 
 
-// Define the Azure OpenAI parameters
-@secure()
-param azureOpenaiEndpoint string
-@secure()
-param azureOpenaiKey string
-param azureOpenaiModelDeploymentName string
+
+
 
 param timestamp string = utcNow('yyyy-MM-ddTHH:mm:ssZ')
 var sanitizedTimestamp = replace(replace(timestamp, '-', ''), ':', '')  
@@ -217,7 +224,7 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2021-03-01' = {
 // Define the Document Intelligence resource
 resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2021-04-30' = {
   name: documentIntelligenceName
-  location: location
+  location: 'westeurope'
   sku: {
     name: 'S0'
   }
@@ -328,6 +335,62 @@ resource functionApp 'Microsoft.Web/sites@2021-03-01' = {
   }
 }
 
+//define frontend app web app
+resource frontendApp 'Microsoft.Web/sites@2021-03-01' = {
+  name: frontendAppName
+  location: location
+  kind: 'app'
+  identity: {
+    type: 'SystemAssigned'
+  }
+  tags: commonTags
+  properties: {
+    serverFarmId: appServicePlan.id
+    httpsOnly: true
+    siteConfig: {
+      pythonVersion: '3.11'
+      linuxFxVersion: 'python|3.11'
+      alwaysOn: true
+      appCommandLine: 'python -m streamlit run app.py --server.port 8000 --server.address 0.0.0.0'
+      appSettings: [
+        {
+          name: 'APPINSIGHTS_INSTRUMENTATIONKEY'
+          value: applicationInsights.properties.InstrumentationKey
+        }
+        {
+          name: 'BLOB_ACCOUNT_URL'
+          value: 'https://${storageAccount.name}.blob.core.windows.net' 
+        }
+        {
+          name: 'CONTAINER_NAME'        
+          value: 'datasets'
+        }
+        {name:'COSMOS_CONFIG_CONTAINER_NAME', value: 'configuration'}
+        {name:'COSMOS_DB_NAME', value: cosmosDbDatabaseName}
+        {name:'COSMOS_DOCUMENTS_CONTAINER_NAME', value: cosmosDbContainerName}
+        {name:'COSMOS_URL', value: cosmosDbAccount.properties.documentEndpoint}
+        {name:'SCM_DO_BUILD_DURING_DEPLOYMENT', value: 'true'}
+        {name:'ENABLE_ORYX_BUILD', value: 'true'}
+
+        
+
+      ]
+    }
+  }
+}
+
+// Role assignments for the Web App's managed identity
+resource webAppStorageBlobDataContributorRole 'Microsoft.Authorization/roleAssignments@2020-04-01-preview' = {
+  name: guid(frontendApp.id, storageAccount.id, 'StorageBlobDataContributor')
+  scope: storageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe') // Storage Blob Data Contributor
+    principalId: frontendApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+
 // Role assignments for the Function App's managed identity
 resource functionAppStorageBlobDataContributorRole 'Microsoft.Authorization/roleAssignments@2020-04-01-preview' = {
   name: guid(functionApp.id, storageAccount.id, 'StorageBlobDataContributor')
@@ -381,6 +444,17 @@ resource cosmosDBRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAs
   properties: {
     roleDefinitionId: cosmosDBDataContributorRoleDefinition.id
     principalId: functionApp.identity.principalId
+    scope: cosmosDbAccount.id
+  }
+}
+
+// Web App role assignment
+resource cosmosDBWebAppRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2021-04-15' = {
+  parent: cosmosDbAccount
+  name: guid(cosmosDbAccount.id, frontendApp.id, cosmosDBDataContributorRoleDefinition.id)
+  properties: {
+    roleDefinitionId: cosmosDBDataContributorRoleDefinition.id
+    principalId: frontendApp.identity.principalId
     scope: cosmosDbAccount.id
   }
 }
